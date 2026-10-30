@@ -1,0 +1,6 @@
+{
+  "name": "Chess Arena — Online Chess Game",
+  "description": "Full-stack online chess platform featuring complete chess rules engine, opening repertoire explorer, theoretical endgame lab, 30s board vision trainer, legal move suggestions, best move evaluation, computer AI, real-time multiplayer, game clocks, player profiles, and dynamic leaderboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
