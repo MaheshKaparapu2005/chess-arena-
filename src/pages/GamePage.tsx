@@ -240,6 +240,13 @@ export const GamePage: React.FC<GamePageProps> = ({
     return '1/2-1/2';
   }, [gameState.isGameOver, gameState.winner]);
 
+  // Formatted SAN moves string for PGN and deep-dive analysis
+  const pgnMovesSummary = useMemo(() => {
+    return moveHistory
+      .map((m, idx) => (idx % 2 === 0 ? `${Math.floor(idx / 2) + 1}. ${m.san}` : m.san))
+      .join(' ');
+  }, [moveHistory]);
+
   // Handle importing custom PGN moves into active game
   const handleImportPgn = (movesSans: string[]) => {
     let simState = createInitialGameState();
@@ -1239,6 +1246,7 @@ export const GamePage: React.FC<GamePageProps> = ({
                   localStorage.setItem('chess_arena_show_eval_bar', String(next));
                   soundService.playSelect();
                 }}
+                pgnString={pgnMovesSummary}
               />
             </div>
           )}

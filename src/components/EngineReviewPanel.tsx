@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   GameAnalysisReport,
   MoveAnalysis,
@@ -6,6 +6,7 @@ import {
 } from '../models/chess';
 import { formatEvaluation } from '../services/chess-eval.service';
 import { soundManager } from '../services/sound.service';
+import { deepDiveService, DeepDiveAnalysisResult } from '../services/deep-dive.service';
 import {
   Cpu,
   X,
@@ -22,6 +23,11 @@ import {
   Sparkles,
   Info,
   BarChart2,
+  Lightbulb,
+  ShieldAlert,
+  Target,
+  Loader2,
+  BrainCircuit,
 } from 'lucide-react';
 
 interface EngineReviewPanelProps {
@@ -36,6 +42,7 @@ interface EngineReviewPanelProps {
   onToggleBestAlternative: () => void;
   showEvalBar?: boolean;
   onToggleEvalBar?: () => void;
+  pgnString?: string;
 }
 
 export const EngineReviewPanel: React.FC<EngineReviewPanelProps> = ({
@@ -50,7 +57,14 @@ export const EngineReviewPanel: React.FC<EngineReviewPanelProps> = ({
   onToggleBestAlternative,
   showEvalBar = true,
   onToggleEvalBar,
+  pgnString,
 }) => {
+  // Deep Dive State
+  const [isDeepDiveOpen, setIsDeepDiveOpen] = useState<boolean>(false);
+  const [autoDeepDive, setAutoDeepDive] = useState<boolean>(false);
+  const [deepDiveMap, setDeepDiveMap] = useState<Record<number, DeepDiveAnalysisResult>>({});
+  const [isDeepDiveLoading, setIsDeepDiveLoading] = useState<boolean>(false);
+
   // Current position evaluation
   const currentEval =
     currentStep >= 0 && currentStep < report.evaluations.length
@@ -111,6 +125,55 @@ export const EngineReviewPanel: React.FC<EngineReviewPanelProps> = ({
       }
     }
   };
+
+  // Fetch Deep Dive for a specific move analysis
+  const fetchDeepDiveForMove = useCallback(
+    async (m: MoveAnalysis) => {
+      if (deepDiveMap[m.ply]) return;
+      setIsDeepDiveLoading(true);
+      try {
+        const result = await deepDiveService.getDeepDiveAnalysis({
+          move: {
+            san: m.move.san || 'move',
+            from: m.move.from ? `${m.move.from.r},${m.move.from.c}` : undefined,
+            to: m.move.to ? `${m.move.to.r},${m.move.to.c}` : undefined,
+            piece: m.move.piece?.type,
+            captured: m.move.captured?.type,
+          },
+          turn: m.turn,
+          ply: m.ply,
+          moveNumber: m.ply,
+          evalBefore: m.evalBefore,
+          evalAfter: m.evalAfter,
+          evalDelta: m.evalDelta,
+          classification: m.classification,
+          bestMoveSan: m.bestMoveSan,
+          bestMoveReason: m.bestMoveReason,
+          recentPgn: pgnString,
+          whitePlayerName,
+          blackPlayerName,
+        });
+
+        setDeepDiveMap((prev) => ({ ...prev, [m.ply]: result }));
+      } catch (err) {
+        console.error('Failed to load deep dive analysis:', err);
+      } finally {
+        setIsDeepDiveLoading(false);
+      }
+    },
+    [deepDiveMap, pgnString, whitePlayerName, blackPlayerName]
+  );
+
+  // Auto trigger deep dive when step changes if autoDeepDive or isDeepDiveOpen is active
+  useEffect(() => {
+    if (currentMoveAnalysis && (isDeepDiveOpen || autoDeepDive)) {
+      if (!deepDiveMap[currentMoveAnalysis.ply]) {
+        fetchDeepDiveForMove(currentMoveAnalysis);
+      }
+    }
+  }, [currentMoveAnalysis, isDeepDiveOpen, autoDeepDive, deepDiveMap, fetchDeepDiveForMove]);
+
+  const activeDeepDive = currentMoveAnalysis ? deepDiveMap[currentMoveAnalysis.ply] : undefined;
 
   const classificationConfig: Record<
     MoveClassificationType,
@@ -317,6 +380,156 @@ export const EngineReviewPanel: React.FC<EngineReviewPanelProps> = ({
                   </p>
                 </div>
               )}
+
+            {/* Deep Dive Action & Gemini Grandmaster Analysis Container */}
+            <div className="pt-2 border-t border-stone-800/80">
+              {!isDeepDiveOpen ? (
+                <button
+                  onClick={() => {
+                    setIsDeepDiveOpen(true);
+                    if (currentMoveAnalysis) {
+                      fetchDeepDiveForMove(currentMoveAnalysis);
+                    }
+                  }}
+                  disabled={isDeepDiveLoading}
+                  className="w-full flex items-center justify-between py-2 px-3 rounded-xl bg-gradient-to-r from-violet-950/70 via-indigo-950/60 to-purple-950/70 hover:from-violet-900/80 hover:to-indigo-900/80 border border-violet-500/40 text-violet-200 text-xs font-semibold shadow-sm transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center space-x-2">
+                    <div className="p-1 rounded-md bg-violet-500/20 text-violet-300 group-hover:scale-110 transition-transform">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-bold text-white">Deep Dive AI Analysis</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-violet-900/60 text-violet-300 border border-violet-500/30">
+                          Gemini
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-violet-300/80">
+                        Tactical idea & strategic breakdown for Move {Math.ceil(currentMoveAnalysis.ply / 2)}{currentMoveAnalysis.turn === 'w' ? '.' : '...'} {currentMoveAnalysis.move.san}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1 text-violet-400 group-hover:text-violet-200 text-xs">
+                    {isDeepDiveLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4" />
+                    )}
+                  </div>
+                </button>
+              ) : (
+                <div className="rounded-xl bg-gradient-to-b from-stone-950 via-stone-900/90 to-stone-950 border border-violet-500/40 shadow-lg overflow-hidden space-y-3 p-3.5">
+                  {/* Deep Dive Header */}
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                    <div className="flex items-center space-x-2">
+                      <div className="p-1 rounded-md bg-violet-500/20 text-violet-300">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-xs font-bold text-white">Gemini Move Deep Dive</span>
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-violet-900/60 text-violet-300 border border-violet-500/30">
+                            {activeDeepDive?.isAiGenerated ? 'Gemini 3.8 Flash' : 'GM Engine'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-stone-400">
+                          Move {Math.ceil(currentMoveAnalysis.ply / 2)}{currentMoveAnalysis.turn === 'w' ? '.' : '...'} {currentMoveAnalysis.move.san} ({currentMoveAnalysis.classificationLabel})
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={() => setAutoDeepDive((prev) => !prev)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer border ${
+                          autoDeepDive
+                            ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
+                            : 'bg-stone-800 text-stone-400 border-stone-700'
+                        }`}
+                        title="Automatically run Deep Dive when navigating moves"
+                      >
+                        Auto: {autoDeepDive ? 'ON' : 'OFF'}
+                      </button>
+                      <button
+                        onClick={() => setIsDeepDiveOpen(false)}
+                        className="p-1 rounded-md hover:bg-stone-800 text-stone-400 hover:text-white transition-colors cursor-pointer"
+                        title="Collapse Deep Dive"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {isDeepDiveLoading ? (
+                    <div className="py-6 flex flex-col items-center justify-center space-y-2 text-stone-400 text-xs">
+                      <Loader2 className="w-6 h-6 animate-spin text-violet-400" />
+                      <span className="text-violet-200 font-medium">Grandmaster AI analyzing tactical and strategic implications...</span>
+                      <span className="text-[10px] text-stone-500">Evaluating piece harmony, king safety & threat counters</span>
+                    </div>
+                  ) : activeDeepDive ? (
+                    <div className="space-y-2.5 text-xs">
+                      {/* Summary verdict */}
+                      <div className="p-2.5 rounded-lg bg-stone-900/90 border border-stone-800 text-stone-200 leading-relaxed font-medium">
+                        {activeDeepDive.summary}
+                      </div>
+
+                      {/* Tactical Idea */}
+                      <div className="space-y-1 p-2.5 rounded-lg bg-stone-950/80 border border-stone-800/80">
+                        <div className="flex items-center space-x-1.5 text-amber-300 font-bold text-[11px]">
+                          <Target className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Tactical Idea & Immediate Threats</span>
+                        </div>
+                        <p className="text-[11px] text-stone-300 leading-relaxed">
+                          {activeDeepDive.tacticalIdea}
+                        </p>
+                      </div>
+
+                      {/* Strategic Context */}
+                      <div className="space-y-1 p-2.5 rounded-lg bg-stone-950/80 border border-stone-800/80">
+                        <div className="flex items-center space-x-1.5 text-sky-300 font-bold text-[11px]">
+                          <ShieldAlert className="w-3.5 h-3.5 text-sky-400" />
+                          <span>Positional & Strategic Context</span>
+                        </div>
+                        <p className="text-[11px] text-stone-300 leading-relaxed">
+                          {activeDeepDive.strategicContext}
+                        </p>
+                      </div>
+
+                      {/* Alternative recommendation */}
+                      {activeDeepDive.recommendedAlternative && (
+                        <div className="space-y-1 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30">
+                          <div className="flex items-center space-x-1.5 text-emerald-300 font-bold text-[11px]">
+                            <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Alternative Recommendation</span>
+                          </div>
+                          <p className="text-[11px] text-emerald-200/90 leading-relaxed">
+                            {activeDeepDive.recommendedAlternative}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Grandmaster Takeaway / Principle */}
+                      <div className="space-y-1 p-2.5 rounded-lg bg-gradient-to-r from-amber-950/40 to-stone-900 border border-amber-500/30">
+                        <div className="flex items-center space-x-1.5 text-amber-300 font-bold text-[11px]">
+                          <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Grandmaster Takeaway</span>
+                        </div>
+                        <p className="text-[11px] text-amber-100/90 italic leading-relaxed">
+                          "{activeDeepDive.grandmasterTakeaway}"
+                        </p>
+                      </div>
+
+                      {/* Evaluation swing banner */}
+                      {activeDeepDive.evaluationTrend && (
+                        <div className="flex items-center justify-between text-[10px] text-stone-400 pt-1 font-mono">
+                          <span>Momentum: {activeDeepDive.evaluationTrend}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div className="p-3.5 rounded-xl bg-stone-950/90 border border-stone-800 text-center space-y-1 text-xs text-stone-400">
